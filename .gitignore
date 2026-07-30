@@ -1,0 +1,23 @@
+# build output
+bin/
+obj/
+dist/
+
+# harness output
+tools/shots/out/
+tools/sim/bin/
+tools/sim/obj/
+
+# runtime files
+*.sav.json
+crash.log
+
+# Glyphs are read from the system font at startup and never redistributed.
+# This folder holds local extraction scratch and rendered specimens of that font.
+assets/
+
+# editors
+.vs/
+.idea/
+*.user
+*.suo
