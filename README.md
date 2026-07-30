@@ -10,19 +10,24 @@ Borland Pascal, на 64-битной Windows не запускается. Игр
 
 ## Запуск
 
-Windows и [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0).
+Скачать `Gopnik.exe` из [релизов](https://github.com/arty-s/gopnik/releases/latest)
+и запустить. Ставить ничего не нужно: всё внутри одного файла, требуется только Windows.
+
+`Alt+Enter` — полный экран. Сейв пишется рядом с исполняемым файлом.
+
+## Сборка из исходников
+
+Нужен [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
 
 ```
 dotnet run --project Gopnik.csproj -c Release
 ```
 
-Сборка одного исполняемого файла:
+Самодостаточный файл, как в релизе:
 
 ```
-dotnet publish Gopnik.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o dist
+dotnet publish Gopnik.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -o release
 ```
-
-`Alt+Enter` — полный экран. Сейв пишется рядом с исполняемым файлом.
 
 | | |
 |---|---|
