@@ -88,31 +88,37 @@ public static class Data
         ("Тесак",   9,   0, 50),
     };
 
+    // Names follow the original's own statistics screen ("Бутсы(+1)", "Понтовые бутсы
+    // (Урон+2)"); its shop lines called the same two pairs something else again. Prices
+    // are taken by position from the bazaar table, which is what the shop actually read.
     public static readonly (string Name, int Bonus, int Price, int Sale)[] Boots =
     {
         ("драные кеды",     0,  0,  0),
-        ("Бутсы",           1, 35, 17),
-        ("Понтовые бутсы",  2, 70, 35),
+        ("Бутсы",           1, 15,  7),
+        ("Понтовые бутсы",  2, 30, 15),
     };
 
     public static readonly (string Name, int Bonus, int Price, int Sale)[] Suits =
     {
         ("своё тряпьё",    0,   0,  0),
-        ("Костюм Abibas",  1,  40, 20),
-        ("Костюм Adidas",  2,  80, 40),
+        ("Костюм Abibas",  1,  15,  7),
+        ("Костюм Adidas",  2,  30, 15),
     };
 
     public static readonly (string Name, int Bonus, int Price, int Sale)[] Jackets =
     {
         ("без кожанки",       0,   0,  0),
-        ("Кожанка",           2,  90, 45),
-        ("Крутая кожанка",    4, 160, 80),
+        ("Кожанка",           2,  25, 12),
+        ("Крутая кожанка",    4,  50, 25),
     };
 
     // ---- prices --------------------------------------------------------------------
-    public const int PriceHotdog = 3;
+    // The bazaar's nine, read out of g.exe at DS:0x0B2E..0x0B36 - the bytes its own menu
+    // code fetches one per line. Order on that screen: хотдог, пиво, очки, abibas,
+    // бутсы, кожанка, adidas, бутсы получше, кожанка получше.
+    public const int PriceHotdog = 2;
     public const int PriceBeer = 5;
-    public const int PriceShades = 30;
+    public const int PriceShades = 10;
 
     // The fence's nine prices, read out of g.exe at DS:0x0B38..0x0B40 - nine consecutive
     // bytes fetched one per line by the code that prints the fence's menu at 0xC558, in
