@@ -82,8 +82,8 @@ public static class Data
     public static readonly (string Name, int Bonus, int Price, int Sale)[] Weapons =
     {
         ("кулаки",  0,   0,  0),
-        ("Кастет",  2,  30, 15),
-        ("Дубинка", 4,  60, 30),
+        ("Кастет",  2,  25, 12),     // цены отсюда же, DS:0x0B3C и 0x0B3D
+        ("Дубинка", 4,  50, 25),
         ("Нож",     6,   0, 35),      // only ever found, never sold new
         ("Тесак",   9,   0, 50),
     };
@@ -113,13 +113,17 @@ public static class Data
     public const int PriceHotdog = 3;
     public const int PriceBeer = 5;
     public const int PriceShades = 30;
-    public const int PriceJoint = 12;
-    public const int PriceMobile = 40;
-    public const int PriceBigJoint = 90;
-    public const int PriceTattoo = 25;
+
+    // The fence's nine prices, read out of g.exe at DS:0x0B38..0x0B40 - nine consecutive
+    // bytes fetched one per line by the code that prints the fence's menu at 0xC558, in
+    // the same order the menu lists them. The bazaar keeps its own nine at DS:0x0B2E.
+    public const int PriceJoint = 15;
+    public const int PriceMobile = 30;
+    public const int PriceBigJoint = 20;
+    public const int PriceTattoo = 10;
     public const int PricePistol = 150;
-    public const int PriceAmmo = 20;
-    public const int PriceSilencer = 80;
+    public const int PriceAmmo = 70;
+    public const int PriceSilencer = 60;
     public const int VetScratches = 3;
     public const int VetBones = 7;
     public const int TrainStat = 20;
