@@ -72,6 +72,14 @@ public static class Texts
     public const string WinLine1 = "^1Ты замочил самого ректора!!! ТЫ САМЫЙ КРУТОЙ!!!";
     public const string WinLine2 = "^6 о чёрт! да это ж не ректор был.";
     public const string WinLine3 = "^6Это был проректор СУНЦа!";
+
+    // The second half of the joke: the man you just beat was a stand-in, and the real one
+    // walks in while you are still catching your breath. All four lines sit together in
+    // the 2003 binary at 0x2D79-0x2DDA, in this order.
+    public const string RectorEnters = "^6Тут заходит настоящий ректор.";
+    public const string RectorTaunt = "^4Мудак! ты тупой дебил, думал что я идиот?";
+    public const string RectorReply = "^2Я думаю ты сконил!";
+    public const string RectorFinal = "^4Ну тада сдохни!";
     public const string WinLine4 = "^1Вновь сила торжествует над интелектом.";
     public const string WinLine5 = "^1После этого сразу началась анархия и полный беспредел.";
     public const string WinLine6 = "^1И не стыдно тебе гоп чёртов?";

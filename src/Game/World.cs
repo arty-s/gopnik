@@ -10,14 +10,34 @@ public sealed class World
     public bool Won;
 
     /// <summary>
+    /// The man guarding the office is a stand-in. Beating him is not the end of the game -
+    /// it is the moment the real one walks in. Set once the first of the two is down.
+    /// </summary>
+    public bool ProrectorDown;
+
+    /// <summary>
+    /// The great magus and psychic Рушель Блаво wants money for writing your save. In 2003
+    /// that was the save system; here the game already writes one after every turn, so what
+    /// survives is the encounter and the charge, not the dependency - losing an evening to
+    /// a missed save is a 2003 limitation worth leaving in 2003. Zero means no standing offer.
+    /// </summary>
+    public int BlavoPrice;
+
+    /// <summary>
     /// Some encounters cannot be walked away from. Without this the optimal play is simply
     /// to decline every unfavourable fight, and a patient player becomes unbeatable - the
     /// game stops being a game and turns into a waiting exercise.
     /// </summary>
     public bool FoeForced;
 
+    /// <summary>Walks since the last new place turned up. Reset on arrival in a district.</summary>
+    private int _dry;
+
     /// <summary>Level needed before the next district will have you.</summary>
     private static readonly int[] Gate = { 3, 5, 8, 11, 99 };
+
+    /// <summary>The level a character needs to belong in a district at all.</summary>
+    public static int LevelForDistrict(int d) => d <= 0 ? 1 : Gate[d - 1];
     public int NextDistrictLevel => Gate[P.DistrictIdx];
     public bool CanTravel => P.Level >= NextDistrictLevel && P.DistrictIdx < Data.Districts.Length - 1;
 
@@ -36,7 +56,7 @@ public sealed class World
     public void Wander()
     {
         Blank();
-        Foe = null; FoeIsCop = false; FoeForced = false;
+        Foe = null; FoeIsCop = false; FoeForced = false; BlavoPrice = 0;
 
         if (P.Stoned > 0 && Rules.Chance(30))
         {
@@ -46,12 +66,51 @@ public sealed class World
             return;
         }
 
+        // Finding the places is the original's own mechanic - it printed "Ты незнаешь, пока
+        // ешё, где находтся базар" - but the rate was ours, and a flat one-in-ten measured
+        // out as a blank map: 35 walks for any given place, one of seven known after ten
+        // walks. You are sent to look for a doctor long before you are told where one is.
+        // So the odds climb with every fruitless walk and reset on a find: the first place
+        // turns up quickly, nothing ever stalls on a bad streak, and the district still has
+        // to be walked rather than handed over.
+        if (HasUnknownPlace() && Rules.Chance(10 + _dry * 5))
+        {
+            _dry = 0;
+            DiscoverPlace();
+            Tick();
+            return;
+        }
+        _dry++;
+
+        if (Rules.Chance(4))
+        {
+            BlavoPrice = 10 + P.DistrictIdx * 5;
+            Say("^7Бродя по окрестностям с самыми грязными намериниями...");
+            Say("^1Ты встретил великого мага и экстрасенса - Рушеля Блаво.");
+            Say($"^7За {BlavoPrice} рублей он может сделать сохранение прямо здесь.");
+            Say("^7Ты хочешь сохраниться? ^Eda^7 - да.");
+            Tick();
+            return;
+        }
+
         int r = Rules.Rng.Next(100);
 
         if (r < 34) { MeetFoe(); Tick(); return; }
         if (r < 42) { MeetCop(); Tick(); return; }
-        if (r < 52) { DiscoverPlace(); Tick(); return; }
-        if (r < 60) { Say(Texts.Pick(Texts.Phone)); Tick(); return; }
+        if (r < 52) { Say(Texts.Pick(Texts.Wander)); Tick(); return; }
+        if (r < 60)
+        {
+            // The one call that does something: it lifts the market ban. While the heat is
+            // on it crowds out the small talk, because that is the call you are waiting for.
+            if (P.BazarClosed && Rules.Chance(55))
+            {
+                P.BazarClosed = false;
+                Say("^EТелефон:^2 Это ты там на базаре шухер наводил? Ну короче там менты свалили.");
+            }
+            else Say(Texts.Pick(Texts.Phone));
+            Tick();
+            return;
+        }
         if (r < 66)
         {
             int m = Rules.Roll(2, 6 + P.ELuck);
@@ -79,7 +138,8 @@ public sealed class World
         // otherwise be no way left to finish the game.
         if (P.DistrictIdx == Data.Districts.Length - 1 && Rules.Chance(35))
         {
-            Foe = Rules.MakeFoe(P, Data.Foes.Length - 1, Math.Max(12, P.Level + 1));
+            Foe = ProrectorDown ? MakeRealRector()
+                                : Rules.MakeFoe(P, Data.Foes.Length - 1, Math.Max(12, P.Level + 1));
             Say("^1Ты снова пробрался в тёмный ректорский кабинет...");
             Say($"^C{Foe.Name} {Foe.Level} уровня. Отступать некуда.");
             return;
@@ -94,7 +154,8 @@ public sealed class World
         // the fights you should look at before taking them, not from every passer-by.
         // None of this in the opening district - that one is where you learn the ropes with
         // nothing in your pockets, and an unavoidable heavyweight there just ends the run.
-        bool elite = P.DistrictIdx > 0 && Rules.Chance(8 + P.DistrictIdx * 7);
+        // The whole mechanic is ours, so classic never spawns one.
+        bool elite = !Rules.Classic && P.DistrictIdx > 0 && Rules.Chance(8 + P.DistrictIdx * 7);
         var f = Rules.MakeFoe(P, idx, Rules.SpawnLevel(P) + (elite ? 4 : 0));
         if (elite)
         {
@@ -182,10 +243,16 @@ public sealed class World
         Say("^1А теперь вали отсюда и никогда здесь не появляйся!");
     }
 
+    /// <summary>Whether this district still has anything left to stumble on.</summary>
+    private bool HasUnknownPlace() => Unknown().Count > 0;
+
+    private List<(Place P, string Cmd, string Name)> Unknown() =>
+        Data.Places.Where(pl => !P.Knows(pl.P) &&
+                                (pl.P != Place.Girl || P.GirlKnown)).ToList();
+
     private void DiscoverPlace()
     {
-        var unknown = Data.Places.Where(pl => !P.Knows(pl.P) &&
-                                              (pl.P != Place.Girl || P.GirlKnown)).ToList();
+        var unknown = Unknown();
         if (unknown.Count == 0) { Say(Texts.Pick(Texts.Wander)); return; }
         var pick = unknown[Rules.Rng.Next(unknown.Count)];
         P.Discover(pick.P);
@@ -229,6 +296,8 @@ public sealed class World
         }
         P.DistrictIdx++;
         Foe = null;
+        _dry = 0;
+        Progress.Reached(P.DistrictIdx);
         var d = P.District;
         Say("^1Ты доказал, что ты самый крутой в этом районе - отправляйся в следующий");
         Say("^1" + d.Arrival);
@@ -241,6 +310,21 @@ public sealed class World
             Foe = Rules.MakeFoe(P, Data.Foes.Length - 1, Math.Max(12, P.Level + 2));
             Say($"^C{Foe.Name} {Foe.Level} уровня. Отступать некуда.");
         }
+    }
+
+    /// <summary>
+    /// The man himself, second round. He is not in the enemy table - the table in the
+    /// original's data segment holds the ten street types and stops before him, so his
+    /// numbers were built in code and are reconstructed here: a shade above the stand-in
+    /// you have just worked through, on a body you have to chew rather than outclass.
+    /// </summary>
+    public Foe MakeRealRector()
+    {
+        var f = Rules.MakeFoe(P, Data.Foes.Length - 1, Math.Max(14, P.Level + 3));
+        f.BossHp = 2.0;
+        f.Armour += 1;
+        f.Greeting = Texts.RectorTaunt;
+        return f;
     }
 
     /// <summary>Death is not always the end - the original let your mates haul you out.</summary>
@@ -256,8 +340,8 @@ public sealed class World
 
         // The very first beating never kills. At level one you have no reputation, so the
         // rescue below cannot fire, and one unlucky opening fight ended the whole run -
-        // which reads as unfair rather than hard.
-        if (P.Knockouts == 1)
+        // which reads as unfair rather than hard. Ours, so classic goes without it.
+        if (P.Knockouts == 1 && !Rules.Classic)
         {
             Say(Texts.SavedByFriends);
             P.Hp = Math.Max(1, P.MaxHp / 3);

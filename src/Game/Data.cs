@@ -38,18 +38,30 @@ public static class Data
     public sealed record Foe(string Name, int Str, int Agi, int Vit, int Luck, int Armour,
                              int Weapon, int Money, string Greeting);
 
+    /// <summary>
+    /// The four stats are the original's own, read out of g.exe: a 40-byte table of ten
+    /// four-byte records at the very start of DGROUP, immediately in front of the array of
+    /// enemy names. The field order is not a guess - the inspect routine at 0x156D loads
+    /// the second field, multiplies it by five, adds twenty and prints it as "Точность #%",
+    /// which is the help screen's "(20+Ловкость*5)%" exactly, and caps at a stat of 14
+    /// because that is where the formula reaches the printed 90% ceiling.
+    ///
+    /// Armour, weapon and money are still ours - those live in tables the recovery has not
+    /// pinned down yet. The Rector is not in the table at all: it stops after the ten
+    /// street types, so his numbers were built in code and remain reconstructed here.
+    /// </summary>
     public static readonly Foe[] Foes =
     {
-        new("Дохляк",         2, 2, 1, 2, 0, 0,  2, "^4А чё ваще?"),
-        new("Нефор",          2, 3, 2, 2, 0, 0,  3, "^4Пацан ты из какого района?"),
-        new("Нарк",           3, 2, 2, 1, 0, 0,  3, "^4Эй мудак?!"),
-        new("Подтсан",        3, 3, 3, 2, 1, 1,  5, "^4Чё те нада козёл?!"),
-        new("Отморозок",      5, 3, 4, 1, 1, 2,  7, "^4Ну ты меня достал ща урою!"),
-        new("Гопник",         4, 4, 4, 3, 2, 2,  8, "^2Урыть тебя ублюдок!"),
-        new("Вор",            3, 6, 3, 6, 1, 2, 14, "^4Отдай кошелёк урод!"),
-        new("Беспредельщик",  7, 4, 5, 2, 2, 4, 12, "^2Ну вот мы и встретились мудак!"),
-        new("Мент",           6, 5, 6, 3, 4, 4, 10, "^4Корявый! ты попался!"),
-        new("Маньячок",       8, 5, 5, 4, 1, 6, 18, "^4Я МАНЬЯК!!!"),
+        new("Дохляк",         1, 2, 1, 2, 0, 0,  2, "^4А чё ваще?"),
+        new("Нефор",          2, 2, 2, 3, 0, 0,  3, "^4Пацан ты из какого района?"),
+        new("Нарк",           2, 2, 2, 2, 0, 0,  3, "^4Эй мудак?!"),
+        new("Подтсан",        3, 3, 3, 3, 1, 1,  5, "^4Чё те нада козёл?!"),
+        new("Отморозок",      5, 2, 4, 1, 1, 2,  7, "^4Ну ты меня достал ща урою!"),
+        new("Гопник",         4, 3, 3, 2, 2, 2,  8, "^2Урыть тебя ублюдок!"),
+        new("Вор",            3, 3, 2, 4, 1, 2, 14, "^4Отдай кошелёк урод!"),
+        new("Беспредельщик",  5, 3, 4, 2, 2, 4, 12, "^2Ну вот мы и встретились мудак!"),
+        new("Мент",           5, 5, 5, 5, 4, 4, 10, "^4Корявый! ты попался!"),
+        new("Маньячок",       5, 6, 8, 3, 1, 6, 18, "^4Я МАНЬЯК!!!"),
         new("Ректор НГУ",     9, 7,  9, 6, 4, 7, 90, "^4Мудак! ты тупой дебил, думал что я идиот?"),
     };
 
@@ -64,34 +76,37 @@ public static class Data
     };
 
     // ---- gear ladders --------------------------------------------------------------
-    public static readonly (string Name, int Bonus, int Price)[] Weapons =
+    // Sale is what the fence gives back for a piece you have outgrown - about half, and a
+    // figure of its own for the two knives, which are only ever found and so have no
+    // shop price to halve.
+    public static readonly (string Name, int Bonus, int Price, int Sale)[] Weapons =
     {
-        ("кулаки",  0,   0),
-        ("Кастет",  2,  30),
-        ("Дубинка", 4,  60),
-        ("Нож",     6,   0),      // only ever found, never sold
-        ("Тесак",   9,   0),
+        ("кулаки",  0,   0,  0),
+        ("Кастет",  2,  30, 15),
+        ("Дубинка", 4,  60, 30),
+        ("Нож",     6,   0, 35),      // only ever found, never sold new
+        ("Тесак",   9,   0, 50),
     };
 
-    public static readonly (string Name, int Bonus, int Price)[] Boots =
+    public static readonly (string Name, int Bonus, int Price, int Sale)[] Boots =
     {
-        ("драные кеды",     0,  0),
-        ("Бутсы",           1, 35),
-        ("Понтовые бутсы",  2, 70),
+        ("драные кеды",     0,  0,  0),
+        ("Бутсы",           1, 35, 17),
+        ("Понтовые бутсы",  2, 70, 35),
     };
 
-    public static readonly (string Name, int Bonus, int Price)[] Suits =
+    public static readonly (string Name, int Bonus, int Price, int Sale)[] Suits =
     {
-        ("своё тряпьё",    0,   0),
-        ("Костюм Abibas",  1,  40),
-        ("Костюм Adidas",  2,  80),
+        ("своё тряпьё",    0,   0,  0),
+        ("Костюм Abibas",  1,  40, 20),
+        ("Костюм Adidas",  2,  80, 40),
     };
 
-    public static readonly (string Name, int Bonus, int Price)[] Jackets =
+    public static readonly (string Name, int Bonus, int Price, int Sale)[] Jackets =
     {
-        ("без кожанки",       0,   0),
-        ("Кожанка",           2,  90),
-        ("Крутая кожанка",    4, 160),
+        ("без кожанки",       0,   0,  0),
+        ("Кожанка",           2,  90, 45),
+        ("Крутая кожанка",    4, 160, 80),
     };
 
     // ---- prices --------------------------------------------------------------------
@@ -114,6 +129,14 @@ public static class Data
     public const int KlubDisco = 15;
     public const int KlubTricks = 22;
     public const int GirlGift = 12;
+
+    /// <summary>
+    /// Standing needed before the priton will have you. The original refused you at the
+    /// door - "Такого конявого непустят в местный притон!" - and announced the moment you
+    /// were let in. It never printed the number; this one sits just under the threshold
+    /// for calling the lads, so the place opens shortly before its main use does.
+    /// </summary>
+    public const int PritonRep = 12;
 
     // ---- reputation ranks: all 43, straight out of the original data segment --------
     public static readonly string[] Ranks =

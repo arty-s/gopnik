@@ -5,11 +5,13 @@ dist/
 
 # harness output
 tools/shots/out/
+tools/shots/out-classic/
 tools/sim/bin/
 tools/sim/obj/
 
 # runtime files
 *.sav.json
+gopnik.progress.json
 crash.log
 
 # Glyphs are read from the system font at startup and never redistributed.

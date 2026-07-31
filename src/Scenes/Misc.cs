@@ -9,6 +9,7 @@ public sealed class CreateScene : IScene
     private readonly World _w = new();
     private int _stage;
     private int _spent;
+    private int _startDistrict;
     private readonly CommandLine _name = new();
 
     // The original hands you twelve points across the four skills. Start each at one and
@@ -28,7 +29,20 @@ public sealed class CreateScene : IScene
         switch (_stage)
         {
             case 0:
-                if (input.AnyKey) _stage = 1;
+                if (input.AnyKey) _stage = Progress.MaxDistrict > 0 ? 4 : 1;
+                return;
+
+            // Pick where to start. Only districts a character of yours has already reached
+            // are on offer; the original kept a save per district and opened the same list.
+            case 4:
+                foreach (char c in input.Typed)
+                {
+                    int d = c - '1';
+                    if (d < 0 || d > Progress.MaxDistrict) continue;
+                    _startDistrict = d;
+                    _stage = 1;
+                    return;
+                }
                 return;
 
             case 1:
@@ -70,11 +84,25 @@ public sealed class CreateScene : IScene
                 if (_name.Submitted is not null)
                 {
                     if (_name.Submitted.Length > 0) p.Name = _name.Submitted;
+
+                    // Starting deeper in means arriving as somebody who could have got
+                    // there: levelled to the gate, with the growth rolled the same way it
+                    // would have been earned, and pocket money to match.
+                    if (_startDistrict > 0)
+                    {
+                        p.DistrictIdx = _startDistrict;
+                        int want = World.LevelForDistrict(_startDistrict);
+                        while (p.Level < want) { p.Xp = p.XpToLevel; Rules.LevelUp(p); }
+                        p.Money += 25 * _startDistrict;
+                        p.AddRep(6 * _startDistrict);
+                    }
+
                     p.Hp = p.MaxHp;
-                    _w.Say("^1" + Data.Districts[0].Arrival);
-                    _w.Say("^1" + Data.Districts[0].Flavour);
+                    _w.Say("^1" + p.District.Arrival);
+                    _w.Say("^1" + p.District.Flavour);
                     _w.Say("^7Доказать свою крутизну ты можешь, отпинывая разных мудаков.");
                     _w.Say("^7Тебе придётся поработать над сабой, чтобы стать крутым.");
+                    _w.Say("^7Где тут базар, врач и качалка - пока неизвестно. Шатайся, само найдётся.");
                     _w.Say("^7Введи ^Ei^7 чтобы посмотреть команды, ^Ew^7 - чтобы шататься по окрестностям.");
                     Save.Write(_w);
                     host.Go(new StreetScene(_w));
@@ -116,6 +144,23 @@ public sealed class CreateScene : IScene
                 s.Write(6, 13, "шанс роста = значение навыка из 12.", Vga.DarkGray);
                 s.Write(6, 14, "0 - сбросить", Vga.DarkGray);
                 if (_spent == 8) s.Write(6, 17, "- жми ВВОД -", Vga.LightGreen);
+                return;
+
+            // Same frame, same key column, same colours as the class picker - it is the
+            // same kind of question asked one screen earlier, and inventing a second look
+            // for it would only make the setup feel like two different games.
+            case 4:
+                s.Box(4, 3, 72, 12, Vga.Cyan, title: "С КАКОГО РАЙОНА НАЧАТЬ");
+                for (int i = 0; i <= Progress.MaxDistrict; i++)
+                {
+                    s.Write(7, 5 + i, $"{i + 1}", Vga.White);
+                    s.Write(10, 5 + i, Data.Districts[i].Name, Vga.LightGreen);
+                    s.Write(24, 5 + i, i == 0
+                        ? "с нуля, как положено"
+                        : $"сразу {World.LevelForDistrict(i)} уровня", Vga.LightGray);
+                }
+                s.Write(6, 13, "Дальше пускают только туда, куда ты уже доходил.", Vga.DarkGray);
+                s.Write(6, 15, "жми цифру", Vga.Yellow);
                 return;
 
             default:
@@ -260,9 +305,9 @@ public sealed class EndScene : IScene
         int y = 5;
         if (_victory)
         {
+            // The "it was only the vice-rector" gag has already been spent, mid-fight, at
+            // the moment it lands hardest. Here the first line is finally true.
             s.Markup(6, y++, Texts.WinLine1);
-            s.Markup(6, y++, Texts.WinLine2);
-            s.Markup(6, y++, Texts.WinLine3);
             y++;
             s.Markup(6, y++, Texts.WinLine4);
             s.Markup(6, y++, Texts.WinLine5);

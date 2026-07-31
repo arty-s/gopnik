@@ -84,12 +84,12 @@ public sealed class LocationScene : IScene
                     if (!Pay(Data.PriceShades)) return;
                     P.Shades = true; Say("^2Модные такие очки от солнца.");
                 }));
-                AddGear(o, "4", Data.Suits, 1, () => P.SuitIdx, v => P.SuitIdx = v, "броня");
-                AddGear(o, "5", Data.Suits, 2, () => P.SuitIdx, v => P.SuitIdx = v, "броня");
-                AddGear(o, "6", Data.Boots, 1, () => P.BootsIdx, v => P.BootsIdx = v, "урон");
-                AddGear(o, "7", Data.Boots, 2, () => P.BootsIdx, v => P.BootsIdx = v, "урон");
-                AddGear(o, "8", Data.Jackets, 1, () => P.JacketIdx, v => P.JacketIdx = v, "броня");
-                AddGear(o, "9", Data.Jackets, 2, () => P.JacketIdx, v => P.JacketIdx = v, "броня");
+                AddGear(o, "4", Data.Suits, 1, () => P.SuitIdx, v => P.SuitIdx = v, "броня", () => P.SuitsOwned, v => P.SuitsOwned = v);
+                AddGear(o, "5", Data.Suits, 2, () => P.SuitIdx, v => P.SuitIdx = v, "броня", () => P.SuitsOwned, v => P.SuitsOwned = v);
+                AddGear(o, "6", Data.Boots, 1, () => P.BootsIdx, v => P.BootsIdx = v, "урон", () => P.BootsOwned, v => P.BootsOwned = v);
+                AddGear(o, "7", Data.Boots, 2, () => P.BootsIdx, v => P.BootsIdx = v, "урон", () => P.BootsOwned, v => P.BootsOwned = v);
+                AddGear(o, "8", Data.Jackets, 1, () => P.JacketIdx, v => P.JacketIdx = v, "броня", () => P.JacketsOwned, v => P.JacketsOwned = v);
+                AddGear(o, "9", Data.Jackets, 2, () => P.JacketIdx, v => P.JacketIdx = v, "броня", () => P.JacketsOwned, v => P.JacketsOwned = v);
                 o.Add(new("t", 0, "Потискать кошельки", P.Klass == Klass.Vor ? "ты вор, тебе можно" : "рискованно", true, Pickpocket));
                 break;
 
@@ -121,8 +121,8 @@ public sealed class LocationScene : IScene
                     if (!Pay(Data.PriceTattoo)) return;
                     P.Tattoo = true; Say("^2Чистый зек.");
                 }));
-                AddGear(o, "5", Data.Weapons, 1, () => P.Weapon, v => P.Weapon = v, "урон");
-                AddGear(o, "6", Data.Weapons, 2, () => P.Weapon, v => P.Weapon = v, "урон");
+                AddGear(o, "5", Data.Weapons, 1, () => P.Weapon, v => P.Weapon = v, "урон", () => P.WeaponsOwned, v => P.WeaponsOwned = v);
+                AddGear(o, "6", Data.Weapons, 2, () => P.Weapon, v => P.Weapon = v, "урон", () => P.WeaponsOwned, v => P.WeaponsOwned = v);
                 o.Add(new("7", Data.PricePistol, "Самопальный пистолет", P.Pistol ? "уже есть" : "стрельба в бандитских районах", !P.Pistol, () =>
                 {
                     if (P.Pistol) { Say("^6Да купил уже, купил."); return; }
@@ -150,6 +150,10 @@ public sealed class LocationScene : IScene
                     P.Money += paid; P.Junk = 0;
                     Say($"^6Барыги дали тебе за хлам {paid} руб.");
                 }));
+                int spare = SpareWorth();
+                o.Add(new("wes", 0, "Продать ненужные вещи",
+                          spare > 0 ? $"выручишь {spare} руб." : "всё, что есть, при деле",
+                          spare > 0, SellSpare));
                 break;
 
             case Place.Vet:
@@ -278,8 +282,9 @@ public sealed class LocationScene : IScene
         return o;
     }
 
-    private void AddGear(List<Opt> o, string key, (string Name, int Bonus, int Price)[] table,
-                         int idx, Func<int> get, Action<int> set, string what)
+    private void AddGear(List<Opt> o, string key, (string Name, int Bonus, int Price, int Sale)[] table,
+                         int idx, Func<int> get, Action<int> set, string what, Func<int> owned,
+                         Action<int> setOwned)
     {
         var it = table[idx];
         bool useful = get() < idx;
@@ -288,9 +293,63 @@ public sealed class LocationScene : IScene
         {
             if (get() >= idx) { Say("^6У тебя уже есть это или получше."); return; }
             if (!Pay(it.Price)) return;
+            int mask = owned();
+            P.Own(ref mask, idx);
+            setOwned(mask);
             set(idx);
             Say($"^2Взял: {it.Name}. {what} +{it.Bonus}.");
         }));
+    }
+
+    /// <summary>What the spare gear in your bag is worth, so the menu can say it up front.</summary>
+    private int SpareWorth()
+    {
+        int sum = 0;
+        void Slot((string Name, int Bonus, int Price, int Sale)[] table, int worn, int mask)
+        {
+            for (int i = 1; i < worn; i++)
+                if (Player.Owns(mask, i)) sum += table[i].Sale;
+        }
+        Slot(Data.Suits, P.SuitIdx, P.SuitsOwned);
+        Slot(Data.Boots, P.BootsIdx, P.BootsOwned);
+        Slot(Data.Jackets, P.JacketIdx, P.JacketsOwned);
+        Slot(Data.Weapons, P.Weapon, P.WeaponsOwned);
+        return sum;
+    }
+
+    /// <summary>
+    /// Everything you own on a rung below the one you are wearing. The original walked
+    /// these one at a time - "У тебя есть ненужный костюм хочешь продать?" - and this keeps
+    /// its per-piece lines while spending a single keypress on the lot.
+    /// </summary>
+    private void SellSpare()
+    {
+        var slots = new (string What, (string Name, int Bonus, int Price, int Sale)[] Table,
+                         Func<int> Worn, Func<int> Owned, Action<int> SetOwned)[]
+        {
+            ("костюм",    Data.Suits,   () => P.SuitIdx,   () => P.SuitsOwned,   v => P.SuitsOwned = v),
+            ("кроссовки", Data.Boots,   () => P.BootsIdx,  () => P.BootsOwned,   v => P.BootsOwned = v),
+            ("кожанку",   Data.Jackets, () => P.JacketIdx, () => P.JacketsOwned, v => P.JacketsOwned = v),
+            ("железку",   Data.Weapons, () => P.Weapon,    () => P.WeaponsOwned, v => P.WeaponsOwned = v),
+        };
+
+        int total = 0;
+        foreach (var slot in slots)
+        {
+            int mask = slot.Owned();
+            for (int i = 1; i < slot.Worn(); i++)
+            {
+                if (!Player.Owns(mask, i)) continue;
+                mask &= ~(1 << i);
+                int paid = slot.Table[i].Sale;
+                P.Money += paid;
+                total += paid;
+                Say($"^2Ты продал {slot.Table[i].Name} за {paid}.");
+            }
+            slot.SetOwned(mask);
+        }
+
+        if (total == 0) Say("^6У тебя нет ненужных вещей.");
     }
 
     private void Pickpocket()
@@ -307,6 +366,7 @@ public sealed class LocationScene : IScene
         {
             Say("^6Блин менты запалят сматывайся!.");
             P.AddRep(-1);
+            P.BazarClosed = true;
         }
     }
 

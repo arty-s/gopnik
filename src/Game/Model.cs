@@ -20,10 +20,28 @@ public sealed class Player
     public int Ammo;
 
     public int Weapon, BootsIdx, SuitIdx, JacketIdx;
+
+    /// <summary>
+    /// What you own per slot, one bit per rung of the ladder, as opposed to what you are
+    /// wearing. The original let gear pile up - that is what its "продать ненужные вещи"
+    /// counter was for, and it named the pieces one by one - so an upgrade cannot simply
+    /// overwrite the old one. Rung zero (bare fists, own rags) is free and never tracked.
+    /// </summary>
+    public int WeaponsOwned, BootsOwned, SuitsOwned, JacketsOwned;
+
+    public void Own(ref int mask, int idx) { if (idx > 0) mask |= 1 << idx; }
+    public static bool Owns(int mask, int idx) => idx > 0 && (mask & (1 << idx)) != 0;
     public int Press;               // abs training -> armour
 
     public bool Cross, RingLuck, RingAll, MegaRing, RingHeal;   // "феньки"
     public bool Mobile, Shades, Tattoo, Pistol, Silencer, Guard;
+
+    /// <summary>
+    /// Heat at the market after a lifted wallet went wrong. The original locked you out -
+    /// "На базар пока нельзя там менты бродят, тебя ищут" - and lifted it with a phone
+    /// call telling you the police had gone.
+    /// </summary>
+    public bool BazarClosed;
 
     public bool JawBroken, LegBroken;
     public int Stoned;              // turns left while high
@@ -34,7 +52,7 @@ public sealed class Player
     public int Knockouts;           // how many times you have been put on the ground
 
     /// <summary>Abs training is capped at half your level - see the note in Rules.Soak.</summary>
-    public int PressCap => (Level + 1) / 2;
+    public int PressCap => Rules.Classic ? Level : (Level + 1) / 2;
 
     // ---- trinket-adjusted stats ------------------------------------------------
     private int Bonus => (RingAll ? 1 : 0) + (MegaRing ? 4 : 0);
@@ -49,22 +67,21 @@ public sealed class Player
     // The original's "Урон = Сила/2 .. Сила" gives 1-3 at a starting strength of three,
     // which against even the weakest enemy meant a dozen rounds. A flat point on both
     // ends fixes the opening without mattering at all by the endgame.
-    public int DamageMin => Math.Max(1, EStr / 2 + 1 + WeaponBonus);
-    public int DamageMax => Math.Max(DamageMin, EStr + 1 + WeaponBonus);
+    public int DamageMin => Math.Max(1, EStr / 2 + (Rules.Classic ? 0 : 1) + WeaponBonus);
+    public int DamageMax => Math.Max(DamageMin, EStr + (Rules.Classic ? 0 : 1) + WeaponBonus);
     public int Armour => Data.Suits[SuitIdx].Bonus + Data.Jackets[JacketIdx].Bonus + Press;
 
     /// <summary>
-    /// Base to-hit. The original printed "(20 + Ловкость×5)%", which at a starting agility
-    /// of three is 35% - and with both sides missing two swings in three, an opening fight
-    /// ran past twenty rounds of nothing. The base is lifted to 30; the ×5 per point and the
-    /// 90% ceiling are the original's.
+    /// Base to-hit. Classic is the original help screen verbatim - "(20 + Ловкость×5)%" with
+    /// the 90% ceiling - which at a starting agility of three is 35%, so both sides miss two
+    /// swings in three and the opening fight runs long.
+    /// Otherwise: a flat base with a shallow slope. At 5% per point the spread between a
+    /// clumsy build (38%) and an agile one (80%) was so wide that agility was the only stat
+    /// worth having; at 2% every build can land a punch and agility is an edge, not the game.
     /// </summary>
-    /// <summary>
-    /// A flat base with a shallow slope. At 5% per point the spread between a clumsy build
-    /// (38%) and an agile one (80%) was so wide that agility was the only stat worth having;
-    /// at 3% every build can land a punch and agility is an edge rather than the whole game.
-    /// </summary>
-    public int Accuracy => Math.Clamp(48 + EAgi * 2, 30, 72);
+    public int Accuracy => Rules.Classic
+        ? Math.Clamp(20 + EAgi * 5, 5, 90)
+        : Math.Clamp(48 + EAgi * 2, 30, 72);
 
     public int XpToLevel => 60 + (Level - 1) * 45;
     public string Rank => Data.Ranks[Math.Clamp(Rep / 3, 0, Data.Ranks.Length - 1)];
@@ -85,6 +102,56 @@ public sealed class Player
 public static class Rules
 {
     /// <summary>
+    /// Play by the 2003 arithmetic instead of the reworked one.
+    ///
+    /// Everything this flag switches is marked "Classic" at the formula itself. Two grades
+    /// of fidelity live under the one name, and it matters which is which:
+    ///
+    /// Restored verbatim from the original help screen - accuracy "(20 + Ловкость×5)%",
+    /// damage "Сила/2 .. Сила", "+5% попадания если ловкость больше", and health
+    /// "10 + Живучесть×5 + Сила" applied to everyone rather than to the player alone.
+    ///
+    /// Reconstructed, because the original never printed a number for it - armour as plain
+    /// subtraction, enemy stats scaled by level rather than by a flat step, an uncapped
+    /// press, and no elites, no forced fights, no free first knockout. These are undone
+    /// because they are demonstrably ours, not because 2003 is known to have done otherwise.
+    /// </summary>
+    public static bool Classic;
+
+    /// <summary>
+    /// Whether the classic set also gives enemies the player's health formula.
+    ///
+    /// Worth its own switch because it is the weakest link in the whole restoration: the
+    /// formula is the original's verbatim, but the enemy stat table it feeds on is a
+    /// reconstruction of relative power, not recovered numbers. A Дохляк with a stamina of
+    /// one comes out at seventeen health, which is what turns an opening fight into twenty
+    /// rounds. Everything else under Classic can stand while this one is reconsidered.
+    /// </summary>
+    public static bool ClassicFoeHp = true;
+
+    /// <summary>The three sets as one number, for the title screen to cycle through.</summary>
+    public static int RuleSet
+    {
+        get => !Classic ? 2 : ClassicFoeHp ? 0 : 1;
+        set { Classic = value != 2; ClassicFoeHp = value == 0; }
+    }
+
+    public static readonly string[] RuleSetNames =
+    {
+        "оригинал 2003",
+        "оригинал, бои короче",
+        "переделанные 2026",
+    };
+
+    /// <summary>One line each, in the terms a player can feel rather than audit.</summary>
+    public static readonly string[] RuleSetNotes =
+    {
+        "вся арифметика 2003-го. Дерёшься долго, мажешь часто, дохнешь легко.",
+        "то же самое, но враги не такие живучие - бой вдвое короче. Так ровнее всего.",
+        "наш пересчёт: бои быстрые, промахов мало, ловкость решает.",
+    };
+
+    /// <summary>
     /// Reseedable so the balance harness can replay an identical run. The game itself
     /// never touches <see cref="Reseed"/>.
     /// </summary>
@@ -102,15 +169,45 @@ public static class Rules
     /// The 90% ceiling is the original's own ("Точность 90%").
     /// </summary>
     public static int HitChance(int accuracy, int myAgi, int hisAgi)
-        => Math.Clamp(accuracy + Math.Clamp((myAgi - hisAgi) * 5, -20, 20), 15, 90);
+        => Classic
+            ? Math.Clamp(accuracy + (myAgi > hisAgi ? 5 : 0), 5, 90)
+            : Math.Clamp(accuracy + Math.Clamp((myAgi - hisAgi) * 5, -20, 20), 15, 90);
 
     /// <summary>
     /// A second swing when you clearly out-move your opponent. Capped low on purpose:
     /// accuracy already multiplies damage, and a second swing multiplies it again, so an
-    /// uncapped bonus makes agility the only stat worth buying.
+    /// uncapped bonus makes agility the only stat worth buying. Used outside Classic;
+    /// Classic has the original's own rule in <see cref="Strikes"/>.
     /// </summary>
     public static bool ExtraSwing(int myAgi, int hisAgi)
         => myAgi > hisAgi && Chance(Math.Min(22, (myAgi - hisAgi) * 7));
+
+    /// <summary>
+    /// How many times you swing in a round, and the odds of one more on top.
+    ///
+    /// Read straight out of the 2003 code at 0x15A4: once agility passes fourteen - the
+    /// point where "(20+Ловкость*5)%" reaches the printed 90% ceiling and stops paying -
+    /// the surplus starts buying swings instead. The surplus is counted down in blocks of
+    /// eighteen, each block worth a whole extra swing, and whatever is left over is the
+    /// percentage chance of one more. Below fifteen agility there are no extra swings at
+    /// all, which is why the original's inspect screen only ever showed "Второй удар #%"
+    /// on a nimble character.
+    ///
+    /// The one part not in the code: how much the other side's agility takes off. The
+    /// original printed "Из-за хорошей ловкости врага ты сможешь пнуть его раз # вместо #",
+    /// so a reduction existed; its size is reconstructed as a single swing.
+    /// </summary>
+    public static (int Count, int ExtraChance) Strikes(int myAgi, int hisAgi)
+    {
+        if (!Classic || myAgi <= 14) return (1, 0);
+
+        int surplus = myAgi - 14;
+        int count = 1;
+        while (surplus > 18) { surplus -= 18; count++; }
+
+        if (hisAgi > myAgi && count > 1) count--;
+        return (count, surplus);
+    }
 
     /// <summary>Luck's only direct combat payoff, so it has to be worth the points.</summary>
     public static int CritChance(int luck) => Math.Min(35, 5 + luck * 3);
@@ -123,7 +220,18 @@ public static class Rules
     /// strongly worth buying without ever making you untouchable.
     /// </summary>
     public static int Soak(int damage, int armour)
-        => Math.Max(Math.Max(1, (int)Math.Ceiling(damage * 0.34)), damage - armour);
+        => Classic
+            ? Math.Max(1, damage - armour)
+            : Math.Max(Math.Max(1, (int)Math.Ceiling(damage * 0.34)), damage - armour);
+
+    /// <summary>
+    /// Strength shoulders through armour. Without this, agility was the only stat that kept
+    /// paying off late, because accuracy multiplies every point of damage while raw strength
+    /// just got eaten by the other guy's jacket. Not something the original printed, so
+    /// classic leaves armour whole.
+    /// </summary>
+    public static int Pierce(int armour, int str)
+        => Classic ? armour : Math.Max(0, armour - str / 4);
 
     public static int FleeChance(bool legBroken, int myAgi, int hisAgi)
         => legBroken ? 0 : Math.Clamp(45 + (myAgi - hisAgi) * 8, 10, 90);
@@ -157,14 +265,23 @@ public static class Rules
     {
         var t = Data.Foes[foeIdx];
         int step = (int)Math.Round((level - 1) * 0.6);
+
+        // Classic scales each stat in proportion to the enemy's own base, so the heavy
+        // types pull away as the levels climb. The rate is calibrated, not recovered: 0.133
+        // makes an average base (~4.5) grow at the same 0.6 a level the additive step uses,
+        // which puts the two side by side in the middle of the game and lets the ends differ.
+        int Scale(int b) => Classic
+            ? Math.Max(1, (int)Math.Round(b * (1 + (level - 1) * 0.133)))
+            : Math.Max(1, b + step);
+
         return new Foe
         {
             Index = foeIdx,
             Name = t.Name,
             Level = level,
-            Str = Math.Max(1, t.Str + step),
-            Agi = Math.Max(1, t.Agi + step),
-            Vit = Math.Max(1, t.Vit + step),
+            Str = Scale(t.Str),
+            Agi = Scale(t.Agi),
+            Vit = Scale(t.Vit),
             Armour = t.Armour + level / 5,
             WeaponBonus = t.Weapon,
             Money = t.Money + Roll(0, level * 3),
@@ -200,16 +317,24 @@ public sealed class Foe
     public double BossHp = 1.0;
 
     /// <summary>
-    /// Deliberately NOT the player's formula. Street trash with the player's health pool
-    /// turns every encounter into a war of attrition; these are people you drop in a
-    /// handful of good kicks.
+    /// Classic gives everyone the one health formula the original printed. Otherwise this is
+    /// deliberately NOT the player's formula: street trash with the player's health pool
+    /// turns every encounter into a war of attrition, and these are people you are meant to
+    /// drop in a handful of good kicks.
     /// </summary>
-    public int MaxHp => (int)Math.Round((3 + Vit * 2 + Str) * BossHp);
+    public int MaxHp => (int)Math.Round(
+        (Rules.Classic && Rules.ClassicFoeHp ? 10 + Vit * 5 + Str : 3 + Vit * 2 + Str) * BossHp);
     public int DamageMin => Math.Max(1, Str / 2 + WeaponBonus);
     public int DamageMax => Math.Max(DamageMin, Str + WeaponBonus);
 
-    /// <summary>A shade below the player's, so a competent character keeps the edge.</summary>
-    public int Accuracy => Math.Clamp(42 + Agi * 2, 20, 70);
+    /// <summary>
+    /// Classic is the same "(20 + Ловкость×5)%" the player gets - the original had one
+    /// accuracy formula. Otherwise a shade below the player's, so a competent character
+    /// keeps the edge.
+    /// </summary>
+    public int Accuracy => Rules.Classic
+        ? Math.Clamp(20 + Agi * 5, 5, 90)
+        : Math.Clamp(42 + Agi * 2, 20, 70);
 
     public void Reset() => Hp = MaxHp;
 }

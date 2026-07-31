@@ -18,6 +18,14 @@ public sealed class Fight
     private int _backupIn = -1;      // rounds until the lads show up
     public bool BackupHere;
 
+    // The lads are not a win button. The original had both of the ways they leave you:
+    // "Твою подмогу отпинали" and "Подмоге надоело столько парится из-за мало понтового
+    // мудака" - so they can be put down, and they walk off if your standing is thin. The
+    // original never printed either number; these scale off reputation, which is the thing
+    // the message itself blames.
+    private int _backupHp;
+    private int _backupPatience;
+
     // Read-only tallies for the balance harness. They never affect play.
     public int MySwings, MyHits, HisSwings, HisHits, DamageDealt, DamageTaken;
 
@@ -40,11 +48,21 @@ public sealed class Fight
 
     // ---- player actions ---------------------------------------------------------
 
+    public int MyStrikes => Rules.Strikes(P.EAgi, F.Agi).Count;
+
     public void Attack()
     {
         if (End != FightEnd.None) return;
-        Swing();
-        if (F.Hp > 0 && Rules.ExtraSwing(P.EAgi, F.Agi))
+
+        var (count, extra) = Rules.Strikes(P.EAgi, F.Agi);
+        if (count > 1)
+            Say($"^2Из-за хорошей ловкости врага ты сможешь пнуть его раз {count}");
+        for (int i = 0; i < count && F.Hp > 0; i++) Swing();
+
+        bool more = F.Hp > 0 && (Rules.Classic
+            ? extra > 0 && Rules.Chance(extra)
+            : Rules.ExtraSwing(P.EAgi, F.Agi));
+        if (more)
         {
             Say("^2Из-за большой ловкости ты можешь пнуть ещё раз");
             Swing();
@@ -131,6 +149,21 @@ public sealed class Fight
             Say("^2Ты смылся.");
             P.AddRep(-2);
             Say("^4Враг: Трусливый засранец!");
+
+            // Running away costs a point of something. Inferred from where the lines sit
+            // in the 2003 binary rather than from the code itself: the four "Сила -1 /
+            // Ловкость -1 / Живучесть -1 / Удача -1" constants sit immediately after
+            // "Враг: Трусливый засранец!" and immediately before the priton refusal, and
+            // nothing else in that stretch spends a stat. Marked as a guess on purpose.
+            switch (Rules.Rng.Next(4))
+            {
+                case 0 when P.Str > 1: P.Str--; Say("^4Сила -1"); break;
+                case 1 when P.Agi > 1: P.Agi--; Say("^4Ловкость -1"); break;
+                case 2 when P.Vit > 1: P.Vit--; Say("^4Живучесть -1"); break;
+                case 3 when P.Luck > 1: P.Luck--; Say("^4Удача -1"); break;
+            }
+            P.Hp = Math.Min(P.Hp, P.MaxHp);
+
             End = FightEnd.Fled;
             return true;
         }
@@ -153,10 +186,7 @@ public sealed class Fight
             dmg *= 2;
             Say(Texts.Pick(Texts.PlayerHits));
         }
-        // Strength shoulders through armour. Without this, agility was the only stat that
-        // kept paying off late, because accuracy multiplies every point of damage while
-        // raw strength just got eaten by the other guy's jacket.
-        dmg = Rules.Soak(dmg, Math.Max(0, F.Armour - P.EStr / 4));
+        dmg = Rules.Soak(dmg, Rules.Pierce(F.Armour, P.EStr));
         F.Hp -= dmg;
         DamageDealt += dmg;
         Say($"^2Ты пнул врага на {dmg}з. У него осталось {Math.Max(0, F.Hp)}");
@@ -181,7 +211,7 @@ public sealed class Fight
 
         int dmg = Rules.Roll(F.DamageMin, F.DamageMax);
         if (Rules.Chance(8)) { dmg *= 2; Say(Texts.Pick(Texts.FoeTaunts)); }
-        dmg = Rules.Soak(dmg, Math.Max(0, P.Armour - F.Str / 4));
+        dmg = Rules.Soak(dmg, Rules.Pierce(P.Armour, F.Str));
         P.Hp -= dmg;
         DamageTaken += dmg;
         Say($"^4Он пнул тебя на {dmg}з. У тебя осталось {Math.Max(0, P.Hp)}");
@@ -203,8 +233,15 @@ public sealed class Fight
     {
         if (CheckDead()) return;
 
-        FoeSwing();
-        if (F.Agi > P.EAgi && Rules.ExtraSwing(F.Agi, P.EAgi))
+        var (his, hisExtra) = Rules.Strikes(F.Agi, P.EAgi);
+        if (his > 1)
+            Say($"^4Из-за твоей хорошей ловкости враг сможет пнуть тебя раз {his}");
+        for (int i = 0; i < his && P.Hp > 0; i++) FoeSwing();
+
+        bool hisMore = P.Hp > 0 && (Rules.Classic
+            ? hisExtra > 0 && Rules.Chance(hisExtra)
+            : F.Agi > P.EAgi && Rules.ExtraSwing(F.Agi, P.EAgi));
+        if (hisMore)
         {
             Say("^4Из-за большой ловкости враг может пнуть ещё раз");
             FoeSwing();
@@ -217,6 +254,8 @@ public sealed class Fight
             if (_backupIn == 0)
             {
                 BackupHere = true;
+                _backupHp = Rules.Roll(10, 18) + P.Rep / 4;
+                _backupPatience = 3 + P.Rep / 12;
                 Say("^2Они уже здесь.");
             }
         }
@@ -226,6 +265,18 @@ public sealed class Fight
             F.Hp -= d;
             Say($"^2Врага отпинали на {d}з. У него осталось {Math.Max(0, F.Hp)}");
             if (CheckDead()) return;
+
+            _backupHp -= Rules.Roll(1, Math.Max(2, F.Str));
+            if (_backupHp <= 0)
+            {
+                BackupHere = false;
+                Say("^4Твою подмогу отпинали.");
+            }
+            else if (--_backupPatience <= 0)
+            {
+                BackupHere = false;
+                Say("^4Подмоге надоело столько парится из-за мало понтового мудака");
+            }
         }
 
         if (P.Stoned > 0 && --P.Stoned == 0)
@@ -261,12 +312,16 @@ public sealed class Fight
             P.Xp += xp;
             outp.Add($"^6За отпин врага ты получаешь {xp} качков опыта");
             int rep = Math.Max(1, (F.Level - P.Level + 3));
+            int before = P.Rep;
             P.AddRep(rep);
             outp.Add($"^2Ты отпинал этого мудака - пацаны этого незабудут. Понтовость улутшилась на {rep}.");
+            if (before < Data.PritonRep && P.Rep >= Data.PritonRep)
+                outp.Add("^1Понтовость улутшилась на столько, что тебе можно заходить в местный притон!");
         }
 
         P.Money += F.Money;
         outp.Add($"^EОпа бабки! {F.Money} рублей на пиво!");
+        if (Rules.Chance(25)) { P.Beer += 0.5; outp.Add("^1Пиво победителю!"); }
         if (Rules.Chance(35)) { P.Junk++; outp.Add("^7Прихватил с него какой-то хлам."); }
 
         outp.AddRange(Loot());
@@ -298,6 +353,7 @@ public sealed class Fight
             if (wep > P.Weapon)
             {
                 P.Weapon = wep;
+                P.Own(ref P.WeaponsOwned, wep);
                 got.Add($"^1Ты отобрал у врага: {Data.Weapons[wep].Name}(урон+{Data.Weapons[wep].Bonus})");
             }
             else if (Rules.Chance(50))

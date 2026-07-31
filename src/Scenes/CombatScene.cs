@@ -14,6 +14,7 @@ public sealed class CombatScene : IScene
     private readonly CommandLine _cmd = new();
     private bool _settled;
     private bool _fatal;
+    private bool _secondStage;      // the real rector is waiting for the next keypress
 
     public CombatScene(World w, Foe foe)
     {
@@ -31,6 +32,15 @@ public sealed class CombatScene : IScene
             if (!_settled) Settle();
             if (c is not null)
             {
+                // Straight from one fight into the next, on whatever health is left.
+                if (_secondStage)
+                {
+                    var real = _w.MakeRealRector();
+                    _w.Foe = real;
+                    Save.Write(_w);
+                    host.Go(new CombatScene(_w, real));
+                    return;
+                }
                 _w.Foe = null;
                 if (_w.Won) { host.Go(new EndScene(_w, victory: true)); return; }
                 Save.Write(_w);
@@ -67,6 +77,26 @@ public sealed class CombatScene : IScene
         {
             bool wasRector = _f.F.Index == Data.Foes.Length - 1;
             foreach (var line in _f.Spoils()) _f.Say(line);
+
+            // The first man in the office is a stand-in, and finding that out is the point
+            // of the whole run. The joke lands here, in the fight, not on the end screen.
+            if (wasRector && !_w.ProrectorDown)
+            {
+                _w.ProrectorDown = true;
+                _secondStage = true;
+                _f.Say("");
+                _f.Say(Texts.WinLine1);
+                _f.Say(Texts.WinLine2);
+                _f.Say(Texts.WinLine3);
+                _f.Say("");
+                _f.Say(Texts.RectorEnters);
+                _f.Say(Texts.RectorReply);
+                _f.Say(Texts.RectorFinal);
+                _f.Say("");
+                _f.Say("^E- жми ввод, деваться некуда -");
+                return;
+            }
+
             if (wasRector) { _w.Won = true; _fatal = false; }
             _f.Say("");
             _f.Say(wasRector ? "^E- жми ввод -" : "^E- жми ввод, идём дальше -");
@@ -127,12 +157,21 @@ public sealed class CombatScene : IScene
         var p = _w.P;
         if (_f.End != FightEnd.None) return "^Fввод^8 - дальше";
 
-        var parts = new List<string> { $"^Fk^8 пнуть ^A{_f.MyHitChance}%" };
+        // The strike count is worth showing: past fifteen agility it is where the whole
+        // stat starts paying, and the odds alone no longer describe the round.
+        int strikes = _f.MyStrikes;
+        var parts = new List<string>
+        {
+            strikes > 1 ? $"^Fk^8 пнуть {strikes} раза ^A{_f.MyHitChance}%"
+                        : $"^Fk^8 пнуть ^A{_f.MyHitChance}%",
+        };
         if (p.Pistol && p.Ammo > 0) parts.Add($"^Ff^8 стрелять ({p.Ammo})");
         if (p.Joints > 0) parts.Add($"^Fkos^8 косяк ({p.Joints})");
         if (p.Beer >= 0.5) parts.Add($"^Fh^8 пиво ({p.Beer:0.0}л)");
         if (_f.CanCallBackup) parts.Add("^Fv^8 братва");
-        parts.Add($"^Fq^8 свалить ^E{_f.MyFleeChance}%");
+        // No running from the office - the refusal is the original's own line, so do not
+        // advertise odds the key can never deliver.
+        if (_f.F.Index != Data.Foes.Length - 1) parts.Add($"^Fq^8 свалить ^E{_f.MyFleeChance}%");
         return string.Join("^8 ∙ ", parts);
     }
 }

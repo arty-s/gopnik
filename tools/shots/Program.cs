@@ -41,8 +41,18 @@ public static class Program
 
     public static int Main(string[] args)
     {
-        _outDir = args.Length > 0 ? args[0]
-            : Path.Combine(AppContext.BaseDirectory, "shots");
+        // --classic renders the same scenes under the 2003 arithmetic, where the numbers on
+        // screen get noticeably wider - a boss carries three digits of health there.
+        Rules.Classic = args.Any(a => a.Equals("--classic", StringComparison.OrdinalIgnoreCase));
+
+        // The scenario travels districts, which unlocks them for future runs and would put
+        // a "which district" screen in front of the next one - the harness has to start
+        // from the same blank slate every time or its scripted keys land on other scenes.
+        try { File.Delete(Path.Combine(AppContext.BaseDirectory, "gopnik.progress.json")); }
+        catch { }
+
+        _outDir = args.FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal))
+            ?? Path.Combine(AppContext.BaseDirectory, "shots");
         Directory.CreateDirectory(_outDir);
 
         // The harness keeps its own save next to its own binary, so a run here can never
@@ -172,22 +182,7 @@ public static class Program
         Snap("stats");
         Key(' ');
 
-        Line("pr");                                 // притон открыт классу Гопник
-        Frames(2);
-        Snap("priton");
-        Line("a");                                  // спросить - откроются места
-        Snap("priton_after");
-        Line("w");
-
-        Line("trn");
-        Frames(2);
-        Snap("trenaj");
-        Line("w");
-
-        Line("bmar");
-        Frames(2);
-        Snap("barygi");
-        Line("w");
+        Places();
 
         Line("i");
         Frames(2);
@@ -207,6 +202,99 @@ public static class Program
             Line("w");                              // из любой локации - наружу
         }
         Snap("late");
+
+        Finale();
+    }
+
+    /// <summary>
+    /// The indoor screens, drawn from a built character rather than a played one. Reaching
+    /// them through the scenario now means grinding reputation past the priton's door, and
+    /// a harness that only ever presses "kick" dies on the way - which cost four screens of
+    /// coverage. Built state also lets the fence actually have something to buy.
+    /// </summary>
+    private static void Places()
+    {
+        var w = new World();
+        var p = w.P;
+        p.Klass = Klass.Gopnik;
+        p.Level = 8;
+        p.Str = 8; p.Agi = 6; p.Vit = 7; p.Luck = 5;
+        p.Rep = 45; p.Money = 320; p.Junk = 3; p.Beer = 1.5; p.Joints = 2;
+        p.Weapon = 2; p.BootsIdx = 2; p.SuitIdx = 2; p.JacketIdx = 1;
+
+        // Owns the rungs below what he is wearing, so "продать ненужные вещи" has stock.
+        p.Own(ref p.WeaponsOwned, 1); p.Own(ref p.WeaponsOwned, 2);
+        p.Own(ref p.BootsOwned, 1); p.Own(ref p.BootsOwned, 2);
+        p.Own(ref p.SuitsOwned, 1); p.Own(ref p.SuitsOwned, 2);
+        p.Own(ref p.JacketsOwned, 1);
+
+        p.GirlKnown = true;
+        foreach (var pl in Data.Places) p.Discover(pl.P);
+        p.Hp = p.MaxHp;
+
+        var tour = new[]
+        {
+            (Place.Priton, "priton"), (Place.Trenaj, "trenaj"),
+            (Place.Barygi, "barygi"), (Place.Bazar, "bazar"),
+        };
+        foreach (var (place, name) in tour)
+        {
+            _host = new Host(new LocationScene(w, place));
+            Frames(2);
+            Snap(name);
+            if (place == Place.Barygi) { Line("wes"); Snap("barygi_sold"); }
+        }
+
+        Line("w");                                  // обратно на улицу, дальше сценарий
+        Frames(2);
+    }
+
+    /// <summary>
+    /// Drives the two-stage ending directly. Wandering into it through the scenario would
+    /// take a winning run, so the harness builds an end-game character and drops him into
+    /// the office instead - the point is to see both halves of the joke render.
+    /// </summary>
+    private static void Finale()
+    {
+        var w = new World();
+        var p = w.P;
+        p.Klass = Klass.Gopnik;
+        // Deliberately overwhelming: this probe checks that both halves of the ending
+        // render, not whether the fight is winnable - the balance harness answers that.
+        p.Level = 20;
+        p.Str = 26; p.Agi = 20; p.Vit = 18; p.Luck = 14;
+        p.Weapon = 4; p.BootsIdx = 2; p.SuitIdx = 2; p.JacketIdx = 2;
+        p.Press = p.PressCap;
+        p.Rep = 100;
+        p.Hp = p.MaxHp;
+        p.DistrictIdx = Data.Districts.Length - 1;
+
+        var stand = Rules.MakeFoe(p, Data.Foes.Length - 1, 14);
+        w.Foe = stand;
+        _host = new Host(new CombatScene(w, stand));
+        Frames(2);
+
+        for (int i = 0; i < 400 && !w.ProrectorDown && In<CombatScene>(); i++)
+        {
+            Line("k");
+            Frames(1);
+        }
+        Snap("finale_twist");
+
+        Line("");                                   // -> настоящий ректор
+        Frames(2);
+        Snap("finale_real");
+
+        for (int i = 0; i < 400 && In<CombatScene>() && !w.Won; i++)
+        {
+            Line("k");
+            Frames(1);
+        }
+        Snap("finale_settled");
+
+        Line("");
+        Frames(30);
+        Snap("finale_end");
     }
 
     /// <summary>
@@ -218,7 +306,9 @@ public static class Program
         if (!In<StreetScene>()) return false;
         _screen.Clear();
         _host.Scene.Draw(_screen, _host.Time);
-        return ScreenText(23).Contains("наехать");
+        // The bar takes one or two rows depending on the scene, so read both of them
+        // rather than pinning the harness to a layout that is allowed to change.
+        return ScreenText(22).Contains("наехать") || ScreenText(23).Contains("наехать");
     }
 
     private static string ScreenText(int row)

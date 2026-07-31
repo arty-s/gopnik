@@ -89,17 +89,33 @@ public static class Hud
     public static void WriteRight(TextScreen s, int rightCol, int y, string text, byte fg)
         => s.Write(rightCol - text.Length + 1, y, text, fg);
 
+    /// <summary>
+    /// Writes, but never past <paramref name="limit"/>. The status strip pairs a left run
+    /// that grows with the character - a forty-character rank, four pieces of kit - against
+    /// a right-aligned block, and by the endgame they meet in the middle and overwrite each
+    /// other. Cutting the left side keeps the right one readable, which is the half that
+    /// carries numbers.
+    /// </summary>
+    public static int WriteClipped(TextScreen s, int x, int y, string text, byte fg, int limit)
+    {
+        if (x >= limit) return x;
+        if (x + text.Length > limit) text = text.Substring(0, Math.Max(0, limit - x));
+        return s.Write(x, y, text, fg);
+    }
+
     /// <summary>The four-row status strip. Everything the player must never have to ask for.</summary>
     public static void Status(TextScreen s, Player p)
     {
         // Rows 0-3 carry the strip; row 4 is the rule that closes it off.
-        int x = s.Write(1, 0, p.Name.ToUpperInvariant(), Vga.White);
-        x = s.Write(x, 0, " ∙ ", Vga.DarkGray);
-        x = s.Write(x, 0, Data.Classes[(int)p.Klass].Name, Vga.LightGray);
-        x = s.Write(x, 0, $" ур.{p.Level}", Vga.LightGray);
-        x = s.Write(x, 0, " ∙ ", Vga.DarkGray);
-        x = s.Write(x, 0, "\"" + p.Rank + "\"", Vga.Yellow);
         string where = $"{p.District.Name}, район {p.DistrictIdx + 1} из {Data.Districts.Length}  {p.Money} руб.";
+        int wall = 78 - where.Length;         // the rank must stop before the district does
+
+        int x = WriteClipped(s, 1, 0, p.Name.ToUpperInvariant(), Vga.White, wall);
+        x = WriteClipped(s, x, 0, " ∙ ", Vga.DarkGray, wall);
+        x = WriteClipped(s, x, 0, Data.Classes[(int)p.Klass].Name, Vga.LightGray, wall);
+        x = WriteClipped(s, x, 0, $" ур.{p.Level}", Vga.LightGray, wall);
+        x = WriteClipped(s, x, 0, " ∙ ", Vga.DarkGray, wall);
+        WriteClipped(s, x, 0, "\"" + p.Rank + "\"", Vga.Yellow, wall);
         WriteRight(s, 78, 0, where, Vga.LightGray);
 
         // Row 1 - the three gauges.
@@ -125,10 +141,14 @@ public static class Hud
         Stat(s, x, 2, "Броня", p.Armour, $"-{p.Armour}");
 
         // Row 3 - what you are wearing and carrying, plus whatever is currently broken.
-        x = s.Write(1, 3, Data.Weapons[p.Weapon].Name, Vga.LightGreen);
-        if (p.BootsIdx > 0) { x = s.Write(x, 3, " ∙ ", Vga.DarkGray); x = s.Write(x, 3, Data.Boots[p.BootsIdx].Name, Vga.LightGreen); }
-        if (p.SuitIdx > 0) { x = s.Write(x, 3, " ∙ ", Vga.DarkGray); x = s.Write(x, 3, Data.Suits[p.SuitIdx].Name, Vga.LightGreen); }
-        if (p.JacketIdx > 0) { x = s.Write(x, 3, " ∙ ", Vga.DarkGray); x = s.Write(x, 3, Data.Jackets[p.JacketIdx].Name, Vga.LightGreen); }
+        string kit = $"пиво {p.Beer:0.0}л  косяки {p.Joints}  хлам {p.Junk}"
+                   + (p.Pistol ? $"  патроны {p.Ammo}" : "");
+        int gearWall = 78 - kit.Length;
+
+        x = WriteClipped(s, 1, 3, Data.Weapons[p.Weapon].Name, Vga.LightGreen, gearWall);
+        if (p.BootsIdx > 0) { x = WriteClipped(s, x, 3, " ∙ ", Vga.DarkGray, gearWall); x = WriteClipped(s, x, 3, Data.Boots[p.BootsIdx].Name, Vga.LightGreen, gearWall); }
+        if (p.SuitIdx > 0) { x = WriteClipped(s, x, 3, " ∙ ", Vga.DarkGray, gearWall); x = WriteClipped(s, x, 3, Data.Suits[p.SuitIdx].Name, Vga.LightGreen, gearWall); }
+        if (p.JacketIdx > 0) { x = WriteClipped(s, x, 3, " ∙ ", Vga.DarkGray, gearWall); x = WriteClipped(s, x, 3, Data.Jackets[p.JacketIdx].Name, Vga.LightGreen, gearWall); }
 
         if (p.JawBroken || p.LegBroken || p.Stoned > 0)
         {
@@ -138,20 +158,23 @@ public static class Hud
             if (p.Stoned > 0) s.Write(bx, 3, " ОБДОЛБАН ", Vga.Black, Vga.Brown);
         }
 
-        string kit = $"пиво {p.Beer:0.0}л  косяки {p.Joints}  хлам {p.Junk}"
-                   + (p.Pistol ? $"  патроны {p.Ammo}" : "");
         WriteRight(s, 78, 3, kit, Vga.LightGray);
 
         s.HLine(0, 4, 80, Vga.Cyan, dbl: true);
     }
 
+    /// <summary>
+    /// One stat and what it buys. Clipped at the right edge: at endgame values every field
+    /// gains a digit and the row runs off the screen, taking the armour figure with it.
+    /// </summary>
     private static int Stat(TextScreen s, int x, int y, string name, int value, string effect)
     {
-        x = s.Write(x, y, name, Vga.LightGray);
-        x = s.Write(x, y, " ", Vga.Black);
-        x = s.Write(x, y, value.ToString(), Vga.White);
-        x = s.Write(x, y, ">", Vga.DarkGray);
-        x = s.Write(x, y, effect, Vga.LightCyan);
+        const int Edge = 79;
+        x = WriteClipped(s, x, y, name, Vga.LightGray, Edge);
+        x = WriteClipped(s, x, y, " ", Vga.Black, Edge);
+        x = WriteClipped(s, x, y, value.ToString(), Vga.White, Edge);
+        x = WriteClipped(s, x, y, ">", Vga.DarkGray, Edge);
+        x = WriteClipped(s, x, y, effect, Vga.LightCyan, Edge);
         return x + 2;
     }
 
@@ -168,10 +191,44 @@ public static class Hud
             s.Markup(1, top + (i - start), lines[i], Vga.LightGray);
     }
 
-    /// <summary>Bottom command hint bar.</summary>
-    public static void Hints(TextScreen s, string hints)
+    /// <summary>Length on screen, with the colour codes taken out.</summary>
+    public static int VisibleLength(string markup)
     {
-        s.HLine(0, 22, 80, Vga.Cyan, dbl: true);
-        s.Markup(1, 23, hints, Vga.DarkGray);
+        int n = 0;
+        for (int i = 0; i < markup.Length; i++)
+        {
+            if (markup[i] == '^' && i + 1 < markup.Length && Hex(markup[i + 1]) >= 0) { i++; continue; }
+            n++;
+        }
+        return n;
+    }
+
+    /// <summary>
+    /// Joins with the roomiest separator that still fits. The command bar has to hold
+    /// whatever the player has found, and a district with everything found runs past
+    /// eighty columns - silently clipping it would hide the destinations they went
+    /// looking for in the first place.
+    /// </summary>
+    public static string JoinFitting(IEnumerable<string> parts, int width)
+    {
+        string last = "";
+        foreach (var sep in new[] { "^8 ∙ ", "^8  ", "^8 " })
+        {
+            last = string.Join(sep, parts);
+            if (VisibleLength(last) <= width) return last;
+        }
+        return last;
+    }
+
+    /// <summary>
+    /// Bottom command bar. Pass <paramref name="second"/> to give it two rows - the rule
+    /// moves up by one and the caller gives up a row of content for it.
+    /// </summary>
+    public static void Hints(TextScreen s, string hints, string? second = null)
+    {
+        int y = second is null ? 23 : 22;
+        s.HLine(0, y - 1, 80, Vga.Cyan, dbl: true);
+        s.Markup(1, y, hints, Vga.DarkGray);
+        if (second is not null) s.Markup(1, 23, second, Vga.DarkGray);
     }
 }

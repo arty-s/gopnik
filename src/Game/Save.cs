@@ -8,8 +8,15 @@ namespace Gopnik.Game;
 /// </summary>
 public static class Save
 {
-    private static string Path =>
-        System.IO.Path.Combine(AppContext.BaseDirectory, "gopnik.sav.json");
+    /// <summary>
+    /// A file per rule set. The two are not interchangeable - the same character has a
+    /// different health pool and a different armour under each - and one shared file would
+    /// mean starting a game in one set silently destroys the run saved from the other.
+    /// </summary>
+    private static string Path => System.IO.Path.Combine(AppContext.BaseDirectory,
+        !Rules.Classic ? "gopnik.sav.json"
+        : Rules.ClassicFoeHp ? "gopnik.classic.sav.json"
+        : "gopnik.classic-lite.sav.json");
 
     public static bool Exists => File.Exists(Path);
 
@@ -35,6 +42,10 @@ public static class Save
         public int Suit { get; set; }
         public int Jacket { get; set; }
         public int Press { get; set; }
+        public int WeaponsOwned { get; set; }
+        public int BootsOwned { get; set; }
+        public int SuitsOwned { get; set; }
+        public int JacketsOwned { get; set; }
         public bool Cross { get; set; }
         public bool RingLuck { get; set; }
         public bool RingAll { get; set; }
@@ -46,12 +57,16 @@ public static class Save
         public bool Pistol { get; set; }
         public bool Silencer { get; set; }
         public bool Guard { get; set; }
+        public bool BazarClosed { get; set; }
         public bool Jaw { get; set; }
         public bool Leg { get; set; }
         public int Stoned { get; set; }
         public int Knockouts { get; set; }
         public int District { get; set; }
         public bool GirlKnown { get; set; }
+        public bool Classic { get; set; }
+        public bool ProrectorDown { get; set; }
+        public bool ClassicFoeHp { get; set; } = true;
         public bool[] Found { get; set; } = Array.Empty<bool>();
     }
 
@@ -71,11 +86,17 @@ public static class Save
             Hp = p.Hp, Xp = p.Xp, Rep = p.Rep, Money = p.Money, Junk = p.Junk,
             Joints = p.Joints, Beer = p.Beer, Ammo = p.Ammo,
             Weapon = p.Weapon, Boots = p.BootsIdx, Suit = p.SuitIdx, Jacket = p.JacketIdx,
-            Press = p.Press, Cross = p.Cross, RingLuck = p.RingLuck, RingAll = p.RingAll,
+            Press = p.Press,
+            WeaponsOwned = p.WeaponsOwned, BootsOwned = p.BootsOwned,
+            SuitsOwned = p.SuitsOwned, JacketsOwned = p.JacketsOwned,
+            Cross = p.Cross, RingLuck = p.RingLuck, RingAll = p.RingAll,
             MegaRing = p.MegaRing, RingHeal = p.RingHeal, Mobile = p.Mobile, Shades = p.Shades,
             Tattoo = p.Tattoo, Pistol = p.Pistol, Silencer = p.Silencer, Guard = p.Guard,
+            BazarClosed = p.BazarClosed,
             Jaw = p.JawBroken, Leg = p.LegBroken, Stoned = p.Stoned, Knockouts = p.Knockouts,
-            District = p.DistrictIdx, GirlKnown = p.GirlKnown, Found = flat,
+            District = p.DistrictIdx, GirlKnown = p.GirlKnown,
+            Classic = Rules.Classic, ClassicFoeHp = Rules.ClassicFoeHp,
+            ProrectorDown = w.ProrectorDown, Found = flat,
         };
 
         try
@@ -94,7 +115,13 @@ public static class Save
             var dto = JsonSerializer.Deserialize<Dto>(File.ReadAllText(Path));
             if (dto is null) return null;
 
+            // A character built under one set of rules has to keep playing by them - his
+            // health and armour mean different things in the other set.
+            Rules.Classic = dto.Classic;
+            Rules.ClassicFoeHp = dto.ClassicFoeHp;
+
             var w = new World();
+            w.ProrectorDown = dto.ProrectorDown;
             var p = w.P;
             p.Name = dto.Name; p.Klass = (Klass)dto.Klass; p.Level = dto.Level;
             p.Str = dto.Str; p.Agi = dto.Agi; p.Vit = dto.Vit; p.Luck = dto.Luck;
@@ -102,10 +129,19 @@ public static class Save
             p.Joints = dto.Joints; p.Beer = dto.Beer; p.Ammo = dto.Ammo;
             p.Weapon = dto.Weapon; p.BootsIdx = dto.Boots; p.SuitIdx = dto.Suit;
             p.JacketIdx = dto.Jacket; p.Press = dto.Press;
+            p.WeaponsOwned = dto.WeaponsOwned; p.BootsOwned = dto.BootsOwned;
+            p.SuitsOwned = dto.SuitsOwned; p.JacketsOwned = dto.JacketsOwned;
+            // Saves written before gear was tracked per rung: treat what is worn as owned,
+            // so an old character does not turn up at the fence with an empty bag.
+            p.Own(ref p.WeaponsOwned, p.Weapon);
+            p.Own(ref p.BootsOwned, p.BootsIdx);
+            p.Own(ref p.SuitsOwned, p.SuitIdx);
+            p.Own(ref p.JacketsOwned, p.JacketIdx);
             p.Cross = dto.Cross; p.RingLuck = dto.RingLuck; p.RingAll = dto.RingAll;
             p.MegaRing = dto.MegaRing; p.RingHeal = dto.RingHeal;
             p.Mobile = dto.Mobile; p.Shades = dto.Shades; p.Tattoo = dto.Tattoo;
             p.Pistol = dto.Pistol; p.Silencer = dto.Silencer; p.Guard = dto.Guard;
+            p.BazarClosed = dto.BazarClosed;
             p.JawBroken = dto.Jaw; p.LegBroken = dto.Leg; p.Stoned = dto.Stoned;
             p.Knockouts = dto.Knockouts;
             p.DistrictIdx = Math.Clamp(dto.District, 0, Data.Districts.Length - 1);

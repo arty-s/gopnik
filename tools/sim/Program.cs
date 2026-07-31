@@ -41,26 +41,168 @@ public static class Program
     private const int TurnCap = 4000;
     private const int RoundCap = 300;
 
+    private static readonly Build[] Builds =
+    {
+        new Build("Сила",          Klass.Otmoroz, 6, 2, 3, 1, 'S'),
+        new Build("Ловкость",      Klass.Pacan,   2, 6, 3, 1, 'A'),
+        new Build("Живучесть",     Klass.Gopnik,  2, 2, 7, 1, 'V'),
+        new Build("Удача",         Klass.Vor,     2, 2, 2, 6, 'L'),
+        new Build("Ровный",        Klass.Gopnik,  3, 3, 3, 3, 'S'),
+        new Build("Сила+Ловкость", Klass.Otmoroz, 5, 5, 1, 1, 'S'),
+        new Build("Танк",          Klass.Gopnik,  4, 1, 6, 1, 'V'),
+    };
+
     public static void Main(string[] args)
     {
-        int runs = args.Length > 0 && int.TryParse(args[0], out var n) ? n : 400;
+        int runs = 400;
+        foreach (var a in args) if (int.TryParse(a, out var n)) runs = n;
 
-        var builds = new[]
+        // Every rule set on the same seeds and the same bot - the arithmetic is the only
+        // thing that differs. The middle one isolates enemy health, which is the single
+        // decision that separates a long classic fight from a short one.
+        var modes = new List<(string Label, bool Classic, bool FoeHp)>
         {
-            new Build("Сила",          Klass.Otmoroz, 6, 2, 3, 1, 'S'),
-            new Build("Ловкость",      Klass.Pacan,   2, 6, 3, 1, 'A'),
-            new Build("Живучесть",     Klass.Gopnik,  2, 2, 7, 1, 'V'),
-            new Build("Удача",         Klass.Vor,     2, 2, 2, 6, 'L'),
-            new Build("Ровный",        Klass.Gopnik,  3, 3, 3, 3, 'S'),
-            new Build("Сила+Ловкость", Klass.Otmoroz, 5, 5, 1, 1, 'S'),
-            new Build("Танк",          Klass.Gopnik,  4, 1, 6, 1, 'V'),
+            ("оригинал", true, true),
+            ("оригинал, здоровье врагов нынешнее", true, false),
+            ("текущий", false, false),
         };
+        if (args.Contains("--classic")) modes.RemoveAll(m => !m.Classic);
+        if (args.Contains("--modern")) modes.RemoveAll(m => m.Classic);
 
         var report = new StringBuilder();
         void Both(string line) { Console.WriteLine(line); report.AppendLine(line); }
 
         Both($"# Баланс «Гопника» - {runs} забегов на билд");
         Both("");
+
+        var heads = new List<(string Label, List<(Build B, List<RunResult> R)> Data)>();
+        foreach (var (label, classic, foeHp) in modes)
+        {
+            Rules.Classic = classic;
+            Rules.ClassicFoeHp = foeHp;
+            Both($"# Свод правил: {label}");
+            Both("");
+            heads.Add((label, Section(Both, runs)));
+        }
+
+        if (heads.Count > 1) HeadToHead(Both, heads);
+        DiscoveryProbe(Both, 4000);
+
+        var path = Path.Combine(AppContext.BaseDirectory, "balance-report.md");
+        File.WriteAllText(path, report.ToString());
+        Console.WriteLine();
+        Console.WriteLine($"отчёт: {path}");
+    }
+
+    /// <summary>
+    /// How long a district stays a blank map. Finding the places is the original's mechanic,
+    /// but the rate is ours, and the rate is what decides whether the opening reads as
+    /// exploring or as being locked out. Rule-set independent - wandering does not care.
+    /// </summary>
+    private static void DiscoveryProbe(Action<string> Both, int trials)
+    {
+        const int Horizon = 120;
+        var places = Data.Places;
+        var sum = new long[places.Length];
+        var miss = new int[places.Length];
+        var knownBy = new long[4];
+        int[] marks = { 10, 20, 30, 50 };
+
+        for (int t = 0; t < trials; t++)
+        {
+            Rules.Reseed(90210 + t);
+            var w = new World();
+            var p = w.P;
+            p.Klass = Klass.Otmoroz;          // the one class that is given nothing for free
+            p.Hp = p.MaxHp;
+
+            var at = new int[places.Length];
+            Array.Fill(at, -1);
+
+            for (int turn = 1; turn <= Horizon; turn++)
+            {
+                w.Wander();
+                w.Foe = null;                  // the probe measures walking, not fighting
+                for (int i = 0; i < places.Length; i++)
+                    if (at[i] < 0 && p.Knows(places[i].P)) at[i] = turn;
+
+                for (int m = 0; m < marks.Length; m++)
+                    if (turn == marks[m]) knownBy[m] += at.Count(x => x >= 0);
+            }
+
+            for (int i = 0; i < places.Length; i++)
+            {
+                if (at[i] < 0) miss[i]++; else sum[i] += at[i];
+            }
+        }
+
+        Both("");
+        Both("# Как быстро находятся заведения");
+        Both("");
+        Both($"Чистое шатание в первом районе, отморозок (ему ничего не дают даром), {trials} прогонов.");
+        Both("");
+        Both("| заведение | ходов до находки | не найдено за " + Horizon + " ходов |");
+        Both("|---|---:|---:|");
+        for (int i = 0; i < places.Length; i++)
+        {
+            int hits = trials - miss[i];
+            string avg = hits == 0 ? "-" : $"{sum[i] / (double)hits:0}";
+            Both($"| {places[i].Name} | {avg} | {miss[i] * 100.0 / trials:0}% |");
+        }
+
+        Both("");
+        Both("| ходов прошатался | заведений известно из " + places.Length + " |");
+        Both("|---:|---:|");
+        for (int m = 0; m < marks.Length; m++)
+            Both($"| {marks[m]} | {knownBy[m] / (double)trials:0.0} |");
+    }
+
+    /// <summary>Side-by-side on the numbers that decide whether a run is winnable.</summary>
+    private static void HeadToHead(Action<string> Both,
+        List<(string Label, List<(Build B, List<RunResult> R)> Data)> heads)
+    {
+        Both("");
+        Both("# Свод правил против свода правил");
+        Both("");
+        Both("| билд | " + string.Join(" | ", heads.SelectMany(h =>
+            new[] { $"побед, {h.Label}", $"раундов/бой, {h.Label}" })) + " |");
+        Both("|---|" + string.Concat(Enumerable.Repeat("---:|", heads.Count * 2)));
+
+        for (int i = 0; i < Builds.Length; i++)
+        {
+            var cells = new List<string>();
+            foreach (var h in heads)
+            {
+                var rs = h.Data[i].R;
+                cells.Add($"{rs.Count(r => r.Victory) * 100.0 / rs.Count:0.0}%");
+                cells.Add($"{Avg(rs.Sum(r => (long)r.Rounds), rs.Sum(r => (long)r.Fights)):0.0}");
+            }
+            Both($"| {Builds[i].Name} | {string.Join(" | ", cells)} |");
+        }
+
+        Both("");
+        Both("| | " + string.Join(" | ", heads.Select(h => h.Label)) + " |");
+        Both("|---|" + string.Concat(Enumerable.Repeat("---:|", heads.Count)));
+        string Row(string name, Func<List<RunResult>, double> f, string fmt) =>
+            $"| {name} | " + string.Join(" | ", heads.Select(h =>
+                f(h.Data.SelectMany(d => d.R).ToList()).ToString(fmt, CultureInfo.InvariantCulture))) + " |";
+
+        Both(Row("побед, все билды", r => r.Count(x => x.Victory) * 100.0 / r.Count, "0.0"));
+        Both(Row("нокаутов за забег", r => r.Average(x => (double)x.Knockouts), "0.00"));
+        Both(Row("смертей за забег", r => r.Average(x => (double)x.Deaths), "0.00"));
+        Both(Row("раундов на бой", r => Avg(r.Sum(x => (long)x.Rounds), r.Sum(x => (long)x.Fights)), "0.0"));
+        Both(Row("боёв за забег", r => r.Average(x => (double)x.Fights), "0"));
+        Both(Row("ходов за забег", r => r.Average(x => (double)x.Turns), "0"));
+        Both(Row("точность игрока %", r => Avg(r.Sum(x => (long)x.MyHits), r.Sum(x => (long)x.MySwings)) * 100, "0"));
+        Both(Row("точность врага %", r => Avg(r.Sum(x => (long)x.HisHits), r.Sum(x => (long)x.HisSwings)) * 100, "0"));
+        Both(Row("зависших забегов %", r => r.Count(x => x.Stalled) * 100.0 / r.Count, "0.0"));
+    }
+
+    /// <summary>The full report for whichever rule set is currently switched on.</summary>
+    private static List<(Build B, List<RunResult> R)> Section(Action<string> Both, int runs)
+    {
+        var builds = Builds;
+
         Both("| билд | класс | побед | смертей | ходов | боёв | раундов/бой | точн. я | точн. враг | ур. финал | понты |");
         Both("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
 
@@ -152,22 +294,28 @@ public static class Program
         }
 
         // ---- where the danger actually lives -------------------------------------
+        long nf = flat.Sum(r => (long)r.NormFights), ef = flat.Sum(r => (long)r.EliteFights);
         Both("");
         Both("## Шпана против матёрых");
         Both("");
-        Both("| | доля встреч | раундов | цена боя | проиграно | сбежал |");
-        Both("|---|---:|---:|---:|---:|---:|");
-        long nf = flat.Sum(r => (long)r.NormFights), ef = flat.Sum(r => (long)r.EliteFights);
-        Both($"| обычная шпана | {nf * 100.0 / (nf + ef):0}% | {flat.Sum(r => (long)r.NormRounds) / (double)nf:0.0} | " +
-             $"{flat.Sum(r => r.NormCost) / nf * 100:0}% | {flat.Sum(r => (long)r.NormLost) * 100.0 / nf:0.0}% | - |");
-        Both($"| матёрые | {ef * 100.0 / (nf + ef):0}% | {flat.Sum(r => (long)r.EliteRounds) / (double)ef:0.0} | " +
-             $"{flat.Sum(r => r.EliteCost) / ef * 100:0}% | {flat.Sum(r => (long)r.EliteLost) * 100.0 / ef:0.0}% | " +
-             $"{flat.Sum(r => (long)r.EliteFled) * 100.0 / ef:0.0}% |");
+        if (ef == 0)
+        {
+            // Classic has no elites at all, so the split has nothing to say.
+            Both("Матёрых в этом своде правил нет - все встречи обычные.");
+        }
+        else
+        {
+            Both("| | доля встреч | раундов | цена боя | проиграно | сбежал |");
+            Both("|---|---:|---:|---:|---:|---:|");
+            Both($"| обычная шпана | {nf * 100.0 / (nf + ef):0}% | {flat.Sum(r => (long)r.NormRounds) / (double)nf:0.0} | " +
+                 $"{flat.Sum(r => r.NormCost) / nf * 100:0}% | {flat.Sum(r => (long)r.NormLost) * 100.0 / nf:0.0}% | - |");
+            Both($"| матёрые | {ef * 100.0 / (nf + ef):0}% | {flat.Sum(r => (long)r.EliteRounds) / (double)ef:0.0} | " +
+                 $"{flat.Sum(r => r.EliteCost) / ef * 100:0}% | {flat.Sum(r => (long)r.EliteLost) * 100.0 / ef:0.0}% | " +
+                 $"{flat.Sum(r => (long)r.EliteFled) * 100.0 / ef:0.0}% |");
+        }
 
-        var path = Path.Combine(AppContext.BaseDirectory, "balance-report.md");
-        File.WriteAllText(path, report.ToString());
-        Console.WriteLine();
-        Console.WriteLine($"отчёт: {path}");
+        Both("");
+        return all;
     }
 
     private static double Avg(long num, long den) => den == 0 ? 0 : num / (double)den;
@@ -233,8 +381,8 @@ public static class Program
 
         double myHit = Rules.HitChance(p.Accuracy, p.EAgi, f.Agi) / 100.0;
         double hisHit = Rules.HitChance(f.Accuracy, f.Agi, p.EAgi) / 100.0;
-        double myDmg = Rules.Soak((p.DamageMin + p.DamageMax) / 2, Math.Max(0, f.Armour - p.EStr / 4));
-        double hisDmg = Rules.Soak((f.DamageMin + f.DamageMax) / 2, Math.Max(0, p.Armour - f.Str / 4));
+        double myDmg = Rules.Soak((p.DamageMin + p.DamageMax) / 2, Rules.Pierce(f.Armour, p.EStr));
+        double hisDmg = Rules.Soak((f.DamageMin + f.DamageMax) / 2, Rules.Pierce(p.Armour, f.Str));
 
         double roundsToKill = f.MaxHp / Math.Max(0.1, myHit * myDmg);
         double roundsToFall = p.Hp / Math.Max(0.1, hisHit * hisDmg);
@@ -357,7 +505,7 @@ public static class Program
 
         if (p.Knows(Place.Trenaj) && p.Money >= Data.TrainStat + 30)
         {
-            if (p.Press < p.Level && p.Money >= Data.TrainPress + 40) { p.Money -= Data.TrainPress; p.Press++; return true; }
+            if (p.Press < p.PressCap && p.Money >= Data.TrainPress + 40) { p.Money -= Data.TrainPress; p.Press++; return true; }
             p.Money -= Data.TrainStat;
             switch (b.Focus)
             {
@@ -412,7 +560,7 @@ public static class Program
             {
                 Str = stat, Agi = stat, Vit = stat, Luck = stat, Level = e.Level,
                 Weapon = e.Weapon, BootsIdx = e.Boots, SuitIdx = e.Suit, JacketIdx = e.Jacket,
-                Press = e.Level / 2,
+                Press = Rules.Classic ? e.Level : e.Level / 2,
             };
             p.Hp = p.MaxHp;
             var foe = Rules.MakeFoe(p, foeIdx, e.Level);

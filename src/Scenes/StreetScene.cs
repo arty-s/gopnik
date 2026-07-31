@@ -23,7 +23,9 @@ public sealed class StreetScene : IScene
         if (_w.FoeForced && _w.Foe is not null &&
             (c is "w" or "go" || Data.Places.Any(pl => pl.Cmd == c)))
         {
-            _w.Blank();
+            // No Blank() here on purpose: a blank line between two identical refusals
+            // defeats the collapsing in World.Say, and somebody pinned by a forced
+            // encounter presses this key a lot. One copy of the line is the whole message.
             _w.Say("^4Поздно рыпаться - он уже прёт на тебя. ^Ek^4 - в драку.");
             return;
         }
@@ -46,6 +48,16 @@ public sealed class StreetScene : IScene
 
             case "go": _w.Travel(); Save.Write(_w); return;
 
+            case "da":
+                _w.Blank();
+                if (_w.BlavoPrice <= 0) { _w.Say("^6Кому ты дакаешь?"); return; }
+                if (p.Money < _w.BlavoPrice) { _w.Say("^6Парень, все стоит бабок!"); return; }
+                p.Money -= _w.BlavoPrice;
+                _w.BlavoPrice = 0;
+                Save.Write(_w);
+                _w.Say("^0Сохранено! ^1Можешь беспредельничать дальше.");
+                return;
+
             case "kos": Joint(); Save.Write(_w); return;
             case "h": Beer(); Save.Write(_w); return;
 
@@ -62,6 +74,18 @@ public sealed class StreetScene : IScene
                     _w.Blank();
                     if (place.P == Place.Girl && !p.GirlKnown) { _w.Say("^4У тебя пока нет девчонки."); return; }
                     if (!p.Knows(place.P)) { _w.Say($"^6Ты ещё не знаешь, где в этом районе {place.Name}."); return; }
+                    if (place.P == Place.Bazar && p.BazarClosed)
+                    {
+                        _w.Say("^6На базар пока нельзя там менты бродят, тебя ищут.");
+                        _w.Say("^7Жди звонка - скажут, когда свалят.");
+                        return;
+                    }
+                    if (place.P == Place.Priton && p.Rep < Data.PritonRep)
+                    {
+                        _w.Say("^4Такого конявого непустят в местный притон!");
+                        _w.Say("^6Сначала надо заработать понтовости - отпинай кого-нибудь.");
+                        return;
+                    }
                     host.Go(new LocationScene(_w, place.P));
                     return;
                 }
@@ -114,13 +138,16 @@ public sealed class StreetScene : IScene
     {
         Hud.Status(s, _w.P);
 
-        int bottom = Hud.Bottom;
-        if (_w.Foe is not null) bottom = Hud.Bottom - 5;
+        // The street is the one screen with somewhere to go, so its command bar takes two
+        // rows - verbs on one, the district's places on the other - and pays a row of log
+        // for it.
+        int bottom = Hud.Bottom - 1;
+        if (_w.Foe is not null) bottom -= 5;
         Hud.DrawLog(s, _w.Log, Hud.Top, bottom);
 
         if (_w.Foe is not null) DrawFoeCard(s, bottom + 1);
 
-        Hud.Hints(s, BuildHints());
+        Hud.Hints(s, BuildVerbs(), BuildPlaces());
         _cmd.Draw(s, 1, 24, t);
     }
 
@@ -146,17 +173,47 @@ public sealed class StreetScene : IScene
         else s.Write(66, y + 2, "[w] мимо", Vga.LightGray);
     }
 
-    private string BuildHints()
+    private string BuildVerbs()
     {
-        var p = _w.P;
         var parts = new List<string> { "^Fw^8 шататься" };
         if (_w.Foe is not null) parts.Add("^Fk^8 наехать");
-        foreach (var pl in Data.Places)
-            if (p.Knows(pl.P) && (pl.P != Place.Girl || p.GirlKnown))
-                parts.Add($"^F{pl.Cmd}^8 {pl.Name}");
+        if (_w.BlavoPrice > 0) parts.Add($"^Eda^8 сохраниться ({_w.BlavoPrice})");
         if (_w.CanTravel) parts.Add("^Ego^8 дальше");
         parts.Add("^Fs^8 себя");
         parts.Add("^Fi^8 команды");
-        return string.Join("^8 ∙ ", parts);
+
+        // How much of the district is still unwalked. It rides with the verbs rather than
+        // with the stats: this is not something you spend, it is a reason to press w. It
+        // leaves the screen the moment the district holds nothing new - a counter sitting
+        // at its own maximum is just noise.
+        string found = Counter();
+        if (found.Length > 0) parts.Add(found);
+
+        return Hud.JoinFitting(parts, 77);
+    }
+
+    /// <summary>
+    /// Only what walking can turn up. The girl is left out on purpose - she is not a place
+    /// you find, she is somebody you have to meet first, and counting her would leave the
+    /// tally stuck one short with nothing the player could do about it.
+    /// </summary>
+    private string Counter()
+    {
+        var p = _w.P;
+        var walkable = Data.Places.Where(pl => pl.P != Place.Girl).ToList();
+        int known = walkable.Count(pl => p.Knows(pl.P));
+        return known >= walkable.Count ? "" : $"^8места {known}/{walkable.Count}";
+    }
+
+    private string BuildPlaces()
+    {
+        var p = _w.P;
+        var parts = Data.Places
+            .Where(pl => p.Knows(pl.P) && (pl.P != Place.Girl || p.GirlKnown))
+            .Select(pl => $"^F{pl.Cmd}^8 {pl.Name}")
+            .ToList();
+
+        if (parts.Count == 0) return "^8ты тут ещё ничего не знаешь";
+        return Hud.JoinFitting(parts, 77);
     }
 }
