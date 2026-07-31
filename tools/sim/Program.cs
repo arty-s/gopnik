@@ -503,7 +503,9 @@ public static class Program
             if (p.Beer < 1 && p.Money >= Data.PriceBeer + 40) { p.Money -= Data.PriceBeer; p.Beer += 0.5; return true; }
         }
 
-        if (p.Knows(Place.Trenaj) && p.Money >= Data.TrainStat + 30)
+        // The gym stops training you once you are ready for the next district, so the bot
+        // must not keep buying stats there either.
+        if (p.Knows(Place.Trenaj) && !w.CanTravel && p.Money >= Data.TrainStat + 30)
         {
             if (p.Press < p.PressCap && p.Money >= Data.TrainPress + 40) { p.Money -= Data.TrainPress; p.Press++; return true; }
             p.Money -= Data.TrainStat;

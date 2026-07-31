@@ -53,6 +53,15 @@ public sealed class LocationScene : IScene
         if (_log.Count > 60) _log.RemoveRange(0, _log.Count - 60);
     }
 
+    /// <summary>The gym's refusal, in its own words. True when it will not train you.</summary>
+    private bool Outgrown()
+    {
+        if (!_w.CanTravel) return false;
+        Say("^6Ты слишком крутой чтобы тренироваться здесь.");
+        Say("^6Качай дальше в следующем районе");
+        return true;
+    }
+
     private bool Pay(int cost)
     {
         if (P.Money < cost) { Say("^4Не хватает бабок."); return false; }
@@ -249,13 +258,21 @@ public sealed class LocationScene : IScene
                 break;
 
             case Place.Trenaj:
-                o.Add(new("1", Data.TrainStat, "Качаться гантелями", "сила +1", true, () =>
+                // The local gym is done with you the moment you are ready to move on:
+                // "Ты слишком крутой чтобы тренироваться здесь" / "Качай дальше в следующем
+                // районе". It is what stops the first district from being farmed for stats.
+                bool outgrown = _w.CanTravel;
+                string gymNote = outgrown ? "ты перерос этот район" : null!;
+
+                o.Add(new("1", Data.TrainStat, "Качаться гантелями", gymNote ?? "сила +1", !outgrown, () =>
                 {
+                    if (Outgrown()) return;
                     if (!Pay(Data.TrainStat)) return;
                     P.Str++; Say("^2Ты прокачиваешь силу. ^1Сила +1");
                 }));
-                o.Add(new("2", Data.TrainStat, "Тренажёры", "живучесть +1", true, () =>
+                o.Add(new("2", Data.TrainStat, "Тренажёры", gymNote ?? "живучесть +1", !outgrown, () =>
                 {
+                    if (Outgrown()) return;
                     if (!Pay(Data.TrainStat)) return;
                     P.Vit++; Say("^2Ты прокачиваешь выносливость. ^1Живучесть +1");
                 }));
